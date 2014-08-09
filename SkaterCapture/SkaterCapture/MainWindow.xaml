@@ -1,8 +1,39 @@
 ﻿<Window x:Class="SkaterCapture.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="MainWindow" Height="350" Width="525" WindowState="Maximized">
-    <Grid>
-        <Image Name="Image" />
+        Title="Skater capture" Height="350" Width="525" WindowState="Maximized" SnapsToDevicePixels="True">
+    <Grid Background="#FFFEFEFE">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <ItemsControl Name="FileList">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border MouseUp="ImageCollectionMouseUp" Cursor="Hand" BorderThickness="0,0,1,0" BorderBrush="Black">
+                        <ItemsControl ItemsSource="{Binding Files}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <Grid />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Image MaxHeight="256" Source="{Binding}" Stretch="UniformToFill" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Border BorderThickness="1" BorderBrush="Black" Grid.Row="1">
+            <Image Opacity="0.9" Name="Image" VerticalAlignment="Center" HorizontalAlignment="Stretch" />
+        </Border>
     </Grid>
 </Window>

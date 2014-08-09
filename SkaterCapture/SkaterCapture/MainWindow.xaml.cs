@@ -2,22 +2,17 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+using AForge.Imaging;
 using AForge.Imaging.Filters;
 using AForge.Video.DirectShow;
 using AForge.Vision.Motion;
+using SkaterCapture.Models;
 using Color = System.Drawing.Color;
 using Encoder = System.Drawing.Imaging.Encoder;
 
@@ -28,6 +23,9 @@ namespace SkaterCapture
     /// </summary>
     public partial class MainWindow : Window
     {
+        private const int GracePeriodInSeconds = 1;
+        private const int ImagesPerSecond = 10;
+
         private readonly MotionDetector _detector;
 
         private DateTime _lastStill;
@@ -35,23 +33,34 @@ namespace SkaterCapture
 
         private Bitmap _backgroundImage;
 
+        private ImageCollection _currentCollection;
+
         public MainWindow()
         {
+
+            foreach (
+                var folder in Directory.GetDirectories(Environment.CurrentDirectory, "*", SearchOption.TopDirectoryOnly))
+            {
+                Directory.Delete(folder, true);
+            }
 
             InitializeComponent();
 
             _detector = new MotionDetector(new TwoFramesDifferenceDetector(), new BlobCountingObjectsProcessing());
 
             var videoInformation = new FilterInfoCollection(FilterCategory.VideoInputDevice);
-            var captureDevice = (VideoCaptureDevice)null;
+            var informationList = new List<FilterInfo>();
+
             foreach (FilterInfo information in videoInformation)
             {
-                captureDevice = new VideoCaptureDevice(information.MonikerString);
-                break;
+                informationList.Add(information);
             }
 
-            if (captureDevice != null)
+            var lastInformation = informationList.FirstOrDefault(i => i.Name.Contains("Front"));
+            if (lastInformation != null)
             {
+                var captureDevice = new VideoCaptureDevice(lastInformation.MonikerString);
+
                 captureDevice.NewFrame += captureDevice_NewFrame;
                 captureDevice.Start();
             }
@@ -60,36 +69,42 @@ namespace SkaterCapture
         void captureDevice_NewFrame(object sender, AForge.Video.NewFrameEventArgs eventArgs)
         {
 
-            Dispatcher.Invoke(delegate()
+            lock (this)
             {
-                var image = eventArgs.Frame;
-                var originalImage = (Bitmap)image.Clone();
 
-                if (_detector.ProcessFrame(image) > 0d && _backgroundImage != null)
+                Dispatcher.Invoke(delegate()
                 {
-                    if ((DateTime.Now - _lastMovement).TotalMilliseconds > 100)
+                    var image = eventArgs.Frame;
+                    var originalImage = (Bitmap)image.Clone();
+
+                    if (_detector.ProcessFrame(image) > 0.01d && _backgroundImage != null)
                     {
-                        _lastMovement = DateTime.Now;
-                        image = CaptureImage(originalImage);
+                        if ((DateTime.Now - _lastMovement).TotalMilliseconds >= 1000d / ImagesPerSecond)
+                        {
+                            _lastMovement = DateTime.Now;
+                            CaptureImage(originalImage);
+                        }
                     }
-                }
-                else if ((DateTime.Now - _lastStill).TotalSeconds > 3 && (DateTime.Now - _lastMovement).TotalSeconds > 3)
-                {
-                    _lastStill = DateTime.Now;
-                    _backgroundImage = originalImage;
-                }
+                    else if ((DateTime.Now - _lastStill).TotalSeconds >= GracePeriodInSeconds &&
+                             (DateTime.Now - _lastMovement).TotalSeconds >= GracePeriodInSeconds)
+                    {
+                        _lastStill = DateTime.Now;
+                        _backgroundImage = originalImage;
+                    }
 
-                var source = ConvertBitmap(image);
-                Image.Source = source;
+                    var source = ConvertBitmap(image);
+                    Image.Source = source;
 
-                image.Dispose();
+                    image.Dispose();
 
-            });
+                });
+
+            }
         }
 
         private Bitmap CaptureImage(Bitmap image)
         {
-            var thresholdedDifferenceFilter = new ThresholdedDifference(35);
+            var thresholdedDifferenceFilter = new ThresholdedDifference(60);
             thresholdedDifferenceFilter.OverlayImage = _backgroundImage;
             var maskImage = thresholdedDifferenceFilter.Apply(image);
 
@@ -97,24 +112,38 @@ namespace SkaterCapture
             var rgbMaskImage = grayscaleFilter.Apply(maskImage);
 
             var intersectFilter = new Intersect(image);
-            var intersection = intersectFilter.Apply(rgbMaskImage);
-            
-            var colorFiltering = new EuclideanColorFiltering();
-            colorFiltering.CenterColor = new AForge.Imaging.RGB(Color.Black);
-            colorFiltering.Radius = 0;
-            colorFiltering.FillOutside = false;
-            colorFiltering.FillColor = new AForge.Imaging.RGB(Color.White);
+            var finalImage = intersectFilter.Apply(rgbMaskImage);
+            finalImage.MakeTransparent(Color.Black);
 
             var myEncoder = Encoder.Quality;
             var myEncoderParameters = new EncoderParameters(1);
 
             var myEncoderParameter = new EncoderParameter(myEncoder, 100L);
-    myEncoderParameters.Param[0] = myEncoderParameter;
+            myEncoderParameters.Param[0] = myEncoderParameter;
 
-            var jgpEncoder = GetEncoder(ImageFormat.Jpeg);
+            var jgpEncoder = GetEncoder(ImageFormat.Png);
 
-            var finalImage = colorFiltering.Apply(intersection);
-            finalImage.Save(DateTime.Now.Ticks + ".jpg", jgpEncoder, myEncoderParameters);
+            var directoryName = _lastStill.Year + "-" + _lastStill.Month + "-" + _lastStill.Day + " " + _lastStill.Hour + _lastStill.Minute + _lastStill.Second;
+            if (!Directory.Exists(directoryName))
+            {
+                Directory.CreateDirectory(directoryName);
+
+                if (_currentCollection != null)
+                {
+                    FileList.Items.Insert(0, _currentCollection);
+                    if (FileList.Items.Count >= 25)
+                    {
+                        FileList.Items.RemoveAt(FileList.Items.Count - 1);
+                    }
+                }
+
+                _currentCollection = new ImageCollection();
+            }
+
+            var fileName = Path.Combine(Environment.CurrentDirectory, directoryName, DateTime.Now.Ticks + ".png");
+            _currentCollection.AddFile(fileName);
+
+            finalImage.Save(fileName, jgpEncoder, myEncoderParameters);
 
             return finalImage;
         }
@@ -132,6 +161,15 @@ namespace SkaterCapture
                           IntPtr.Zero,
                           Int32Rect.Empty,
                           BitmapSizeOptions.FromEmptyOptions());
+        }
+
+        private void ImageCollectionMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            var element = (FrameworkElement) sender;
+            var collection = (ImageCollection) element.DataContext;
+
+            var window = new PickShotWindow(collection);
+            window.Show();
         }
     }
 }
