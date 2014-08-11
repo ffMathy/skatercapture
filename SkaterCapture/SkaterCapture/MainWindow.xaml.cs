@@ -46,7 +46,7 @@ namespace SkaterCapture
 
             InitializeComponent();
 
-            _detector = new MotionDetector(new TwoFramesDifferenceDetector(), new BlobCountingObjectsProcessing());
+            _detector = new MotionDetector(new TwoFramesDifferenceDetector(), new MotionBorderHighlighting());
 
             var videoInformation = new FilterInfoCollection(FilterCategory.VideoInputDevice);
             var informationList = new List<FilterInfo>();
